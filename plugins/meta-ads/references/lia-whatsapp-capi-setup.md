@@ -127,7 +127,35 @@ The first inbound message webhook from WhatsApp (via Meta Business API or your p
 }
 ```
 
-Save `ctwa_clid` and `source_id` on the Kommo lead the moment the conversation opens. Lia's existing intake step is the right place — one extra n8n Set node.
+Save `ctwa_clid` and `source_id` on the Kommo lead the moment the conversation opens.
+
+### Kommo custom fields to add (one-time setup)
+
+In Kommo → Leads → Settings → Fields, add to the lead entity:
+
+| Field name | Type | Code (for API access) |
+|---|---|---|
+| `ctwa_clid` | Text | `ctwa_clid` |
+| `ad_source_id` | Text | `ad_source_id` |
+| `ad_source_url` | URL | `ad_source_url` |
+
+These hold per-lead attribution data. They're never edited by hand — only written by the intake node below.
+
+### n8n intake node (in Lia's WhatsApp-inbound workflow)
+
+Insert at the very first step **after** the WhatsApp webhook trigger, **before** any Lia-message-generation logic:
+
+**Node: Set (rename to "Capture CTWA attribution")**
+
+| Operation | Field | Value |
+|---|---|---|
+| Set | `ctwa_clid` | `={{ $json.referral?.ctwa_clid ?? '' }}` |
+| Set | `ad_source_id` | `={{ $json.referral?.source_id ?? '' }}` |
+| Set | `ad_source_url` | `={{ $json.referral?.source_url ?? '' }}` |
+
+Then add an **IF** node: only update Kommo if `ctwa_clid` is non-empty (no point clobbering custom fields for organic chats). On the true branch, call your existing "update Kommo lead custom fields" node with the three values above mapped to the field codes.
+
+In Lia's confirmation/booking node downstream, read the lead's stored `ctwa_clid` and pass it into the CAPI payload — it's already wired in the Code node above (`lead.cf?.ctwa_clid`).
 
 ## Verify
 
