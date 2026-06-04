@@ -32,7 +32,8 @@ plugins/meta-ads/
 ├── references/
 │   ├── meta-apis.md                  # endpoints, payload shapes, required fields
 │   ├── octorate-capi-wiring.md       # checklist to restore CAPI on Octorate-managed pixel
-│   ├── n8n-capi-setup.md             # n8n workflow nodes for Octorate webhook → main pixel CAPI
+│   ├── n8n-capi-setup.md             # n8n nodes: Octorate engine-page booking → main pixel CAPI
+│   ├── lia-whatsapp-capi-setup.md    # n8n nodes: Lia WhatsApp booking → main pixel CAPI (chat source)
 │   ├── event-mapping.md              # current → standard event mapping (Domos-specific)
 │   └── pixel-cleanup-plan.md         # tiered deletion plan with dependency checks
 ├── templates/
@@ -53,6 +54,7 @@ Real-account diagnostic + remediation deliverables, built from a live audit of b
 
 - **`references/octorate-capi-wiring.md`** — fix CAPI on `OctorateEnginDomos` (1140308951186601), silent since 2025-11-05.
 - **`references/n8n-capi-setup.md`** — append two nodes to the existing Octorate-booking n8n workflow to fire CAPI Purchase to the **main pixel** in parallel with Octorate's native CAPI.
+- **`references/lia-whatsapp-capi-setup.md`** — same pattern for Lia's WhatsApp-driven bookings (`action_source: 'chat'`), including `ctwa_clid` attribution for Click-to-WhatsApp ads.
 - **`templates/purchase-event-capi.py`** — generic Python reference if you ever move off n8n.
 - **`templates/purchase-event-browser.html`** — only relevant if your confirmation page lives on your domain (not Octorate's).
 - **`references/event-mapping.md`** — concrete current → standard event mapping for the custom events firing today (`dPageView`, `SubscribedButtonClick`, etc.).

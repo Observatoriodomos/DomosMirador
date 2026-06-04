@@ -29,8 +29,8 @@ These have signal but are duplicates or fragments of what should be a single pix
 
 | Dataset ID | Name | Status | Plan |
 |---|---|---|---|
-| `1727298344968140` | Domos Mirador WhatsApp Extras Wapp | created 2026-06-01, never fired | Pick one of the two WhatsApp pixels, install only that one, delete the other. |
-| `4323706314552040` | Domos Mirador WhatsApp v3 | created 2026-06-01, never fired | Same — pick one. |
+| `1727298344968140` | Domos Mirador WhatsApp Extras Wapp | created 2026-06-01, never fired | **Re-evaluate after Lia CAPI is live.** If Lia fires Purchase to the main pixel (recommended — see `lia-whatsapp-capi-setup.md`), these two are unneeded and can be deleted. If you want a separate WhatsApp-only pixel, pick one of these two and delete the other. |
+| `4323706314552040` | Domos Mirador WhatsApp v3 | created 2026-06-01, never fired | Same — see row above. |
 | `1338450634126000` | Reserva Done! | browser-only, no CAPI | If meant as the booking-confirmation pixel: consolidate into `458979157007770` Pixel Principal via the dedup contract, then delete. Otherwise, fix its CAPI per `octorate-capi-wiring.md`. |
 
 ## Tier 3 — Do NOT delete (active or strategic)
