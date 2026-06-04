@@ -183,11 +183,27 @@ Wire to **Workflow 2** (reception handoff) at the end of this chain.
 
 ---
 
-## Workflow 2 — Reception handoff
+## Workflow 2 — Reception handoff (two-number setup)
+
+**Architecture assumed:** Lia uses WhatsApp number A (her own, connected to Kommo). Reception uses WhatsApp number B (also connected to Kommo). Both numbers post into the same Kommo lead, so reception can scroll up and see Lia's full conversation.
 
 **Trigger:** end of Workflow 1 → reception handoff fires once payment is confirmed AND `reception_handoff_sent_at` is empty.
 
-**What it does:** moves the lead to `Recepción` status, attaches a structured handoff note, and sends a WhatsApp message to reception's number with the same info.
+**What it does:**
+1. Posts a structured handoff note on the Kommo lead (so reception has a one-glance summary).
+2. Moves the lead to `Recepción` status (which also triggers Lia's "stop replying" filter — see below).
+3. Reassigns the responsible user from Lia-bot to a designated reception Kommo user.
+4. **From Lia's number (A):** sends the guest a bridging message — "Pago confirmado, recepción te contactará en breve desde [+506-XXXX-XXXX]" — so the guest expects the second number.
+5. Notifies reception (in Kommo + optionally on their phone) that a new lead is waiting. Reception then manually sends the first message from their number — keeps WhatsApp template approval simple.
+
+### Required env vars
+
+```
+RECEPTION_KOMMO_USER_ID    # numeric ID of the reception human in Kommo
+RECEPTION_PHONE_DISPLAY    # the WhatsApp number to TELL the guest about, e.g. "+506 8888 7777"
+                           # this is reception's number formatted for human reading
+LIA_WA_PHONE_NUMBER_ID     # Meta phone_number_id for Lia's WhatsApp (for sending the bridging message)
+```
 
 ### Node 1 — IF (idempotency)
 
@@ -195,7 +211,7 @@ Wire to **Workflow 2** (reception handoff) at the end of this chain.
 {{ $json.lead.cf.reception_handoff_sent_at }} is empty
 ```
 
-### Node 2 — Code (build the handoff payload)
+### Node 2 — Code (build all the handoff payloads at once)
 
 ```javascript
 const lead = $input.first().json.lead;
@@ -203,6 +219,7 @@ const lead = $input.first().json.lead;
 const handoff = {
   booking_id: lead.cf.octorate_booking_id,
   guest_name: lead.name,
+  guest_first_name: (lead.name || '').split(' ')[0],
   phone: lead.phone,
   email: lead.email ?? '—',
   room_type: lead.cf.room_type_id,
@@ -212,51 +229,133 @@ const handoff = {
   payment_method: lead.cf.payment_method,
   lead_source: lead.cf.ad_source_id ? `Meta ad ${lead.cf.ad_source_id}` : 'orgánico',
   special_requests: lead.cf.special_requests ?? '—',
-  lia_conversation_url: `https://${process.env.KOMMO_SUBDOMAIN}.kommo.com/leads/detail/${lead.id}`,
+  kommo_lead_url: `https://${process.env.KOMMO_SUBDOMAIN}.kommo.com/leads/detail/${lead.id}`,
+  octorate_url: `https://app.octorate.com/booking/${lead.cf.octorate_booking_id}`,
 };
 
-// Markdown message body for WhatsApp
-const whatsappBody = `🏡 *Nueva llegada confirmada*
+// (1) Structured note for the Kommo lead — what reception scans
+const handoffNote = `🏡 *Nueva llegada confirmada*
 
 *Huésped:* ${handoff.guest_name}
 *Tel:* ${handoff.phone}
 *Email:* ${handoff.email}
 
-*Reserva:* ${handoff.booking_id}
+*Reserva:* ${handoff.booking_id} → ${handoff.octorate_url}
 *Domo:* ${handoff.room_type}
 *Check-in:* ${handoff.check_in}
 *Noches:* ${handoff.nights}
 *Total pagado:* ${handoff.total_paid}
 
 *Origen:* ${handoff.lead_source}
-*Pedidos especiales:* ${handoff.special_requests}
+*Pedidos especiales:* ${handoff.special_requests}`;
 
-Conversación con Lia: ${handoff.lia_conversation_url}`;
+// (2) Bridging message FROM Lia TO guest — tells them about the second number
+const bridgingMessage = `¡${handoff.guest_first_name}, pago confirmado! 🎉
+
+Tu reserva está lista. Nuestro equipo de recepción te contactará pronto desde *${process.env.RECEPTION_PHONE_DISPLAY}* para coordinar tu llegada y enviarte indicaciones.
+
+Por favor agrega ese número a tus contactos como *Recepción Domos Mirador* para no perder el mensaje.
+
+¡Nos vemos en ${handoff.check_in}!`;
 
 return {
   json: {
     handoff,
-    whatsappBody,
+    handoffNote,
+    bridgingMessage,
     kommo_lead_id: lead.id,
+    guest_phone_e164: lead.phone,   // assumed already in E.164 like +50688887777
   },
 };
 ```
 
-### Node 3 — Kommo Add Note
+### Node 3 — Kommo Add Note (structured summary for reception)
 
 - Lead ID: `{{ $json.kommo_lead_id }}`
-- Note text: `{{ $json.whatsappBody }}`
-- Note type: `common` (or `service_message` if you want it pinned)
+- Note text: `{{ $json.handoffNote }}`
+- Note type: `service_message` (pinned, more visible than `common`)
 
-### Node 4 — Kommo Move to "Recepción" status
+### Node 4 — Kommo Update Lead (status + responsible user + timestamp)
 
 - Lead ID: `{{ $json.kommo_lead_id }}`
 - Status: `Recepción`
+- Responsible user: `{{ $env.RECEPTION_KOMMO_USER_ID }}`
 - Custom field `reception_handoff_sent_at`: `{{ $now.toISO() }}`
 
-### Node 5 — WhatsApp Send Message (reception's number)
+This single update does the **status change** + the **reassignment** in one API call.
 
-Since reception's number is already connected to Kommo, you have two options:
+### Node 5 — Send bridging message from Lia's number
+
+**HTTP Request to WhatsApp Cloud API** (or your provider's equivalent):
+
+- Method: POST
+- URL: `https://graph.facebook.com/v21.0/{{ $env.LIA_WA_PHONE_NUMBER_ID }}/messages`
+- Auth: Bearer `{{ $env.META_ACCESS_TOKEN }}` in header (NOT in query — this is WhatsApp API, different auth pattern from CAPI)
+- Body:
+
+```json
+{
+  "messaging_product": "whatsapp",
+  "recipient_type": "individual",
+  "to": "{{ $json.guest_phone_e164 }}",
+  "type": "text",
+  "text": { "body": "{{ $json.bridgingMessage }}" }
+}
+```
+
+Note: since the guest just paid, you're well within the 24-hour customer-service window, so a free-form text message works — no pre-approved template needed.
+
+### Node 6 — (Optional) Notify reception on their phone
+
+If you want reception to get a WhatsApp ping on number B when a new handoff drops, add a second HTTP Request similar to Node 5 but:
+- URL uses `{{ $env.RECEPTION_WA_PHONE_NUMBER_ID }}` (different phone_number_id)
+- `to` is reception's own number (set as env var)
+- `body` is a compact summary: ``Nueva llegada: ${handoff.guest_name} – ${handoff.check_in} – ${handoff.kommo_lead_url}``
+
+This needs reception's number to be a WhatsApp Business API number too. **Skip this if reception just monitors Kommo notifications on their phone** — the Kommo mobile app already pushes them when a lead is assigned.
+
+### What the guest sees
+
+```
+[from Lia's number]
+  ¡Juan, pago confirmado! 🎉
+  Tu reserva está lista. Nuestro equipo de recepción te contactará pronto
+  desde +506 8888 7777 para coordinar tu llegada...
+
+  [10 minutes later — reception manually sends from her number]
+
+[from Reception's number]
+  Hola Juan, soy Carmen de Domos Mirador. ¡Bienvenido! Tu domo está listo
+  para el viernes a las 3pm. ¿A qué hora estimas llegar?
+```
+
+The guest's phone now has **two threads**, but the bridging message + reception's manual intro make the transition natural.
+
+---
+
+## Stop Lia from replying after handoff
+
+Lia must NOT keep responding once reception has taken over. Add this guard at the start of every Lia-reply workflow (the ones that handle inbound WhatsApp messages):
+
+### Belt-and-suspenders IF node
+
+Place this **immediately after** the WhatsApp inbound trigger, **before** any Lia LLM call:
+
+```
+Condition: continue ONLY if BOTH are true:
+  AND  {{ $json.lead.status }} not in ['Pagado', 'Recepción', 'Pre-llegada', 'Activo', 'Concluido', 'Post-estancia']
+  AND  {{ $json.lead.responsible_user_id }} == {{ $env.LIA_KOMMO_USER_ID }}
+```
+
+If either check fails → skip Lia's LLM call entirely. Optionally append the inbound message as a Kommo note so reception still sees it on the lead, and optionally notify the responsible user.
+
+### Lia's "I'm handing off" final message (optional but recommended)
+
+The *last* message Lia sends before status flips to `Recepción` is the bridging one above. That gives a clean conversational exit. After that, even if the guest sends "gracias" back to Lia's number, Lia's IF check above means she goes silent — Kommo still records the message on the lead so reception can choose to reply if it's important.
+
+---
+
+
 
 **Option A (recommended) — Kommo's WhatsApp API:**
 
