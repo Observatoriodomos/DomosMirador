@@ -12,12 +12,13 @@ Add to the main Lia pipeline (or a new "Estancia" pipeline) **in this order**:
 
 1. `Cotizado` — Lia sent quote
 2. `Aceptado` — guest accepted, Octorate booking created
-3. `Pagado` — payment confirmed (Stripe OR SINPE)
-4. `Pre-llegada` — within 7 days of check-in, pre-arrival sequence active
-5. `Recepción` — handoff sent, guest is reception's responsibility
-6. `Activo` — checked in
-7. `Concluido` — checked out
-8. `Post-estancia` — review/return-guest sequence active
+3. `Pago en revisión` — SINPE screenshot received, awaiting human bank check
+4. `Pagado` — payment confirmed (Stripe webhook OR human marked SINPE as verified)
+5. `Pre-llegada` — within 7 days of check-in, pre-arrival sequence active
+6. `Recepción` — handoff sent, guest is reception's responsibility
+7. `Activo` — checked in
+8. `Concluido` — checked out
+9. `Post-estancia` — review/return-guest sequence active
 
 ### Lead custom fields
 
@@ -31,6 +32,11 @@ Add to the main Lia pipeline (or a new "Estancia" pipeline) **in this order**:
 | `total_amount` | Numeric | `total_amount` | CAPI value |
 | `check_in_date` | Date | `check_in_date` | Triggers pre-arrival + reception sequences |
 | `reception_handoff_sent_at` | DateTime | `reception_handoff_sent_at` | Idempotency for handoff |
+| `sinpe_screenshot_url` | URL | `sinpe_screenshot_url` | Link to the WhatsApp media file |
+| `sinpe_extracted_amount` | Numeric | `sinpe_extracted_amount` | LLM-read amount from the image |
+| `sinpe_extracted_reference` | Text | `sinpe_extracted_reference` | LLM-read SINPE reference code |
+| `sinpe_extracted_sender` | Text | `sinpe_extracted_sender` | LLM-read sender name |
+| `sinpe_amount_matches` | Checkbox | `sinpe_amount_matches` | True if extracted amount == total_amount |
 
 Plus the attribution fields from `lia-whatsapp-capi-setup.md` (`ctwa_clid`, `ad_source_id`, `ad_source_url`).
 
@@ -122,6 +128,164 @@ payment_method       = sinpe
 ```
 
 Connect into the shared chain.
+
+#### SINPE screenshot pre-verification (before reaching `Pagado`)
+
+For SINPE payments the guest sends a screenshot of their bank transfer via WhatsApp. Lia must extract data from the image, pre-validate it, and move the lead to `Pago en revisión` for human bank verification. Only after a human confirms the transfer in the bank does the lead advance to `Pagado` (which fires Trigger B above).
+
+**Why human-in-the-loop:** SINPE screenshots are easily photoshopped — a common scam in CR. The vision LLM pre-screen catches typos and amount mismatches automatically; the human catches forgeries.
+
+##### SINPE handler workflow — append to Lia's WhatsApp-inbound flow
+
+Trigger condition: inbound WhatsApp message has an image attachment AND lead status is `Aceptado` (i.e. quote accepted, awaiting payment).
+
+###### Node S1 — Download the image
+
+If you're using WhatsApp Cloud API directly:
+
+- **HTTP Request** GET `https://graph.facebook.com/v21.0/<media_id>` with `Authorization: Bearer {{ $env.META_ACCESS_TOKEN }}` → returns a temporary `url`.
+- **HTTP Request** GET that `url` with the same header → binary image data.
+
+If you're using Kommo's WhatsApp integration, the attachment URL comes through directly in the inbound message JSON.
+
+###### Node S2 — Vision LLM extraction (Claude or GPT-4V)
+
+**HTTP Request to Anthropic (Claude vision)**:
+
+- Method: POST
+- URL: `https://api.anthropic.com/v1/messages`
+- Headers:
+  - `x-api-key: {{ $env.ANTHROPIC_API_KEY }}`
+  - `anthropic-version: 2023-06-01`
+  - `content-type: application/json`
+- Body:
+
+```json
+{
+  "model": "claude-haiku-4-5-20251001",
+  "max_tokens": 400,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "base64",
+            "media_type": "image/jpeg",
+            "data": "{{ $binary.data.toString('base64') }}"
+          }
+        },
+        {
+          "type": "text",
+          "text": "This is a screenshot of a SINPE Móvil transaction from Costa Rica. Extract these fields and respond with ONLY valid JSON (no prose, no markdown fence):\n\n{\n  \"is_sinpe_screenshot\": boolean,\n  \"amount_crc\": number or null,\n  \"amount_usd\": number or null,\n  \"reference_code\": string or null,\n  \"sender_name\": string or null,\n  \"recipient_phone\": string or null,\n  \"transaction_datetime\": ISO8601 string or null,\n  \"bank_name\": string or null,\n  \"red_flags\": array of strings (anything suspicious: edited text, mismatched fonts, inconsistent shadows, blur over fields, etc.)\n}\n\nIf this is NOT a SINPE screenshot (e.g. random photo), set is_sinpe_screenshot=false and leave the rest null."
+        }
+      ]
+    }
+  ]
+}
+```
+
+Haiku is cheap enough that running it on every inbound image is fine (~$0.001 per screenshot). Use Sonnet only if you find Haiku misreads frequently.
+
+###### Node S3 — Parse + validate
+
+**Code node:**
+
+```javascript
+const lead = $('Kommo Get Lead').first().json;     // adjust to your node name
+const raw = $input.first().json.content?.[0]?.text ?? '{}';
+
+let extracted;
+try { extracted = JSON.parse(raw); }
+catch (e) {
+  return { json: { action: 'ask_resend', reason: 'parse_failed' } };
+}
+
+if (!extracted.is_sinpe_screenshot) {
+  return { json: { action: 'ignore', reason: 'not_a_sinpe_screenshot' } };
+}
+
+// Convert CRC to USD if only CRC was extracted (rough — use a real rate source for production).
+const CRC_PER_USD = 525;
+const amountUsd = extracted.amount_usd
+  ?? (extracted.amount_crc ? extracted.amount_crc / CRC_PER_USD : null);
+
+const expectedUsd = parseFloat(lead.cf.total_amount);
+const tolerance = 0.5;                              // accept ±$0.50 rounding slop
+const matches = amountUsd != null
+  && Math.abs(amountUsd - expectedUsd) <= tolerance;
+
+const hasRedFlags = (extracted.red_flags ?? []).length > 0;
+
+return {
+  json: {
+    action: matches && !hasRedFlags ? 'advance_to_review' : 'flag_for_human',
+    kommo_lead_id: lead.id,
+    extracted,
+    amount_usd_normalized: amountUsd,
+    expected_usd: expectedUsd,
+    matches,
+    has_red_flags: hasRedFlags,
+    red_flags: extracted.red_flags ?? [],
+  },
+};
+```
+
+###### Node S4 — Kommo Update Lead + post note
+
+**Kommo Update Lead**:
+- Lead ID: `{{ $json.kommo_lead_id }}`
+- Status: `Pago en revisión` (always — even when extraction looks good, the human still does the bank check)
+- Custom fields:
+  - `sinpe_extracted_amount`: `{{ $json.amount_usd_normalized }}`
+  - `sinpe_extracted_reference`: `{{ $json.extracted.reference_code }}`
+  - `sinpe_extracted_sender`: `{{ $json.extracted.sender_name }}`
+  - `sinpe_amount_matches`: `{{ $json.matches }}`
+  - `payment_method`: `sinpe`
+
+**Kommo Add Note** — what the human reviewer scans:
+
+```
+💸 *SINPE recibido — verificar en banco*
+
+*Esperado:* ${expected_usd} USD
+*Extraído del screenshot:* ${amount_usd_normalized} USD ${matches ? '✅ coincide' : '⚠️ NO coincide'}
+*Referencia:* ${reference_code}
+*De:* ${sender_name}
+*Banco:* ${bank_name}
+*Fecha:* ${transaction_datetime}
+
+${has_red_flags ? '⚠️ *Alertas:* ' + red_flags.join(', ') : ''}
+
+→ Verificar en banco. Si está, mover a Pagado.
+```
+
+###### Node S5 — Lia reply to guest
+
+If `action == 'advance_to_review'`:
+> ¡Gracias! Recibimos tu comprobante. Lo estamos verificando con el banco y te confirmamos en breve (usualmente menos de 30 min).
+
+If `action == 'flag_for_human'`:
+> ¡Gracias! Recibimos tu comprobante pero necesitamos validar algunos datos. Nuestro equipo te confirma muy pronto.
+
+If `action == 'ask_resend'`:
+> No logramos leer bien el comprobante. ¿Nos puedes reenviar la captura completa de SINPE, asegurándote de que se vean el monto, la referencia y el nombre? 🙏
+
+If `action == 'ignore'`:
+> (silent — pass to Lia's normal LLM reply path; she'll handle it as a regular message)
+
+##### Human verification → `Pagado`
+
+The reception/finance human opens the lead in Kommo, sees the structured SINPE note, checks the bank, and:
+- If transfer is real → moves status to `Pagado` → triggers Workflow 1 Trigger B → CAPI Purchase fires + reception handoff begins.
+- If transfer is fake or wrong amount → posts a note + Lia (or human) asks guest to clarify.
+
+##### Optional Level-C upgrade — auto-confirm via bank notification
+
+When BAC/BCR sends an SMS or email for each incoming SINPE, an n8n trigger can parse it (extract amount + reference) and match against open `Pago en revisión` leads. If a match is found, auto-advance to `Pagado`. This eliminates the human bank-check step entirely. Defer until you have ~2 weeks of Level-B data showing the extraction is reliable.
+
+---
 
 ### Shared — CAPI Purchase + mark paid
 
