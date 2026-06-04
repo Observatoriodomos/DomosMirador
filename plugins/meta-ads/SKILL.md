@@ -34,6 +34,7 @@ plugins/meta-ads/
 │   ├── octorate-capi-wiring.md       # checklist to restore CAPI on Octorate-managed pixel
 │   ├── n8n-capi-setup.md             # n8n nodes: Octorate engine-page booking → main pixel CAPI
 │   ├── lia-whatsapp-capi-setup.md    # n8n nodes: Lia WhatsApp booking → main pixel CAPI (chat source)
+│   ├── customer-journey-roadmap.md   # end-to-end journey map + gap analysis + 80/20 sequence
 │   ├── event-mapping.md              # current → standard event mapping (Domos-specific)
 │   └── pixel-cleanup-plan.md         # tiered deletion plan with dependency checks
 ├── templates/
