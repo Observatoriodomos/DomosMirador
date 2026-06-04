@@ -32,11 +32,12 @@ plugins/meta-ads/
 ├── references/
 │   ├── meta-apis.md                  # endpoints, payload shapes, required fields
 │   ├── octorate-capi-wiring.md       # checklist to restore CAPI on Octorate-managed pixel
+│   ├── n8n-capi-setup.md             # n8n workflow nodes for Octorate webhook → main pixel CAPI
 │   ├── event-mapping.md              # current → standard event mapping (Domos-specific)
 │   └── pixel-cleanup-plan.md         # tiered deletion plan with dependency checks
 ├── templates/
-│   ├── purchase-event-browser.html   # drop-in fbq snippets for Purchase + Lead
-│   └── purchase-event-capi.py        # server-side CAPI POST with hashing + dedup
+│   ├── purchase-event-browser.html   # drop-in fbq snippets (only for non-hosted booking pages)
+│   └── purchase-event-capi.py        # generic Python CAPI POST template (Flask/FastAPI)
 ├── mocks/
 │   ├── pixel-events.json
 │   ├── capi-events.json
@@ -51,7 +52,9 @@ plugins/meta-ads/
 Real-account diagnostic + remediation deliverables, built from a live audit of business `977790985957267`:
 
 - **`references/octorate-capi-wiring.md`** — fix CAPI on `OctorateEnginDomos` (1140308951186601), silent since 2025-11-05.
-- **`templates/purchase-event-browser.html`** + **`templates/purchase-event-capi.py`** — paired browser + server templates with shared `event_id` dedup, SHA-256 hashing, `fbc`/`fbp` cookie handling.
+- **`references/n8n-capi-setup.md`** — append two nodes to the existing Octorate-booking n8n workflow to fire CAPI Purchase to the **main pixel** in parallel with Octorate's native CAPI.
+- **`templates/purchase-event-capi.py`** — generic Python reference if you ever move off n8n.
+- **`templates/purchase-event-browser.html`** — only relevant if your confirmation page lives on your domain (not Octorate's).
 - **`references/event-mapping.md`** — concrete current → standard event mapping for the custom events firing today (`dPageView`, `SubscribedButtonClick`, etc.).
 - **`references/pixel-cleanup-plan.md`** — tiered deletion plan with safety check (audience references verified empty on main account).
 
