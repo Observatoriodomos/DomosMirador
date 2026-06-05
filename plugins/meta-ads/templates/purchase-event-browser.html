@@ -1,0 +1,87 @@
+<!--
+  ============================================================================
+  ONLY APPLICABLE IF your booking confirmation renders on YOUR domain.
+  For Octorate-hosted booking pages (engine.octorate.com), skip this file
+  and rely entirely on server-side CAPI — see references/n8n-capi-setup.md.
+  ============================================================================
+
+  Drop-in browser-side Purchase + Lead snippets for the Domos Mirador Pixel Principal
+  (458979157007770). Place on the post-booking confirmation page and the
+  inquiry-form thank-you page respectively.
+
+  Critical: `eventID` MUST match the server-side CAPI `event_id` for dedup.
+  Generate it once on the server (e.g., UUID v4) and pass it to both:
+    - the browser (template variable, rendered into eventID below)
+    - the CAPI POST (event_id field)
+
+  The standard Pixel base code (fbq init) must already be loaded site-wide.
+  Do NOT replace your existing fbq init — these are *additional* track calls.
+-->
+
+<!-- =========================================================
+     PURCHASE — fire on the booking-confirmation page only
+     ========================================================= -->
+<script>
+  (function () {
+    // Replace these template tags with your templating engine's syntax.
+    // Values must be available server-side at render time.
+    var booking = {
+      id: '{{ booking.id }}',                        // also used as event_id in CAPI
+      total: parseFloat('{{ booking.total_usd }}'),  // numeric, not string
+      currency: 'USD',                               // ISO 4217 uppercase
+      room_type_id: '{{ booking.room_type_id }}',
+      nights: parseInt('{{ booking.nights }}', 10)
+    };
+
+    fbq('track', 'Purchase', {
+      currency: booking.currency,
+      value: booking.total,
+      content_ids: [booking.room_type_id],
+      content_type: 'product',
+      contents: [{ id: booking.room_type_id, quantity: booking.nights }],
+      num_items: booking.nights
+    }, {
+      eventID: booking.id   // <-- dedup key. MUST equal CAPI event_id.
+    });
+  })();
+</script>
+
+<!-- =========================================================
+     LEAD — fire on the inquiry-form thank-you page only
+     ========================================================= -->
+<script>
+  (function () {
+    var lead = {
+      id: '{{ lead.id }}',                           // also used as event_id in CAPI
+      source: '{{ lead.source }}'                    // e.g., "whatsapp", "form", "phone"
+    };
+
+    fbq('track', 'Lead', {
+      content_category: lead.source
+    }, {
+      eventID: lead.id
+    });
+  })();
+</script>
+
+<!-- =========================================================
+     REPLACE CUSTOM EVENTS WITH STANDARD ONES
+     Audit your site-wide JS and replace these patterns:
+
+       fbq('trackCustom', 'SubscribedButtonClick', ...)
+         →  fbq('track', 'Lead', { content_category: 'newsletter' }, { eventID: <uuid> })
+
+       fbq('trackCustom', 'dPageView', ...)
+       (on /booking, /checkout paths)
+         →  fbq('track', 'InitiateCheckout', { ... }, { eventID: <uuid> })
+
+       fbq('trackCustom', 'socialLink', ...)
+         →  Don't track. Doesn't optimize anything.
+
+       fbq('trackCustom', 'scroll', ...)
+         →  Don't track. Use Meta's built-in engagement signals instead.
+
+       fbq('trackCustom', 'click', ...)  (CTA buttons)
+         →  fbq('track', 'Lead', ...) for the ones that lead to inquiry/conversion.
+            Drop the rest.
+     ========================================================= -->
