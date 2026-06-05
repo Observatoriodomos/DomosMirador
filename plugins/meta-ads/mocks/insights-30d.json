@@ -1,0 +1,28 @@
+{
+  "window": { "lookback_days": 30, "as_of": "2026-06-04" },
+  "ads": [
+    {
+      "ad_id": "1234567890",
+      "ad_name": "Summer_Tee_v3",
+      "adset_id": "11111",
+      "campaign_id": "99999",
+      "daily": [
+        { "date": "2026-05-06", "impressions": 12400, "clicks": 113, "spend": 42.10, "ctr": 0.0091, "cpm": 3.39, "purchases": 4 },
+        { "date": "2026-05-13", "impressions": 12100, "clicks": 109, "spend": 41.80, "ctr": 0.0090, "cpm": 3.45, "purchases": 4 },
+        { "date": "2026-05-20", "impressions": 11800, "clicks": 71, "spend": 41.20, "ctr": 0.0060, "cpm": 3.49, "purchases": 2 },
+        { "date": "2026-05-27", "impressions": 11500, "clicks": 48, "spend": 40.90, "ctr": 0.0042, "cpm": 3.56, "purchases": 1 }
+      ]
+    },
+    {
+      "ad_id": "9876543210",
+      "ad_name": "TrailRunner_Launch",
+      "adset_id": "22222",
+      "campaign_id": "99999",
+      "daily": [
+        { "date": "2026-05-27", "impressions": 8200, "clicks": 95, "spend": 150.10, "ctr": 0.0116, "cpm": 18.30, "purchases": 6 },
+        { "date": "2026-05-28", "impressions": 8100, "clicks": 91, "spend": 148.20, "ctr": 0.0112, "cpm": 18.30, "purchases": 5 },
+        { "date": "2026-06-03", "impressions": 6900, "clicks": 78, "spend": 290.50, "ctr": 0.0113, "cpm": 42.10, "purchases": 5 }
+      ]
+    }
+  ]
+}
