@@ -1,6 +1,0 @@
-id,title,description,availability,condition,price,link,image_link,brand
-sku_42,Summer Tee,Lightweight cotton tee for summer wear,in stock,new,19.99 USD,https://shop.example.com/p/summer-tee,https://cdn.example.com/summer-tee.jpg,Example
-sku_88,Trail Runner Shoe,All-terrain running shoe with grippy outsole,in stock,new,149.00 USD,https://shop.example.com/p/trail-runner,https://cdn.example.com/trail-runner.jpg,Example
-sku_103,Wool Beanie,Merino wool beanie one size,out of stock,new,24.50 USD,https://shop.example.com/p/wool-beanie,https://cdn.example.com/wool-beanie.jpg,Example
-sku_204,Rain Shell,Three-layer rain shell with pit zips,in stock,new,189.00 USD,https://shop.example.com/p/rain-shell,https://cdn.example.com/rain-shell.jpg,Example
-sku_311,Camp Mug,Enamel camp mug 12oz,in stock,new,12.00 USD,https://shop.example.com/p/camp-mug,https://cdn.example.com/camp-mug.jpg,Example
